@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Visualizing and Analyzing Text Data</title>
+    <meta charset="utf-8">
+    <meta name="author" content="Kivalina Grove" />
+    <meta name="date" content="2019-02-04" />
+    <link href="libs/remark-css/default.css" rel="stylesheet" />
+    <link href="libs/remark-css/default-fonts.css" rel="stylesheet" />
+  </head>
+  <body>
+    <textarea id="source">
+class: center, middle, inverse, title-slide
+
+# Visualizing and Analyzing Text Data
+## with tidytext and ggwordcloud
+### Kivalina Grove
+### 02/04/2019
+
+---
+
+
+
+
+background-image: url(LegoGradStudent.jpg)
+class: center, bottom, inverse
+
+"Enjoying his work, the grad student solemnly ponders whether he has fallen victim to Stockholm syndrome. #gradschool"
+
+Image credit: [Lego Grad Student](https://legogradstudent.tumblr.com/image/177771200086)
+
+---
+
+## Getting Twitter Data: rtweet package
+
+Install the [**rtweet**](https://cran.r-project.org/web/packages/rtweet/rtweet.pdf) package. 
+
+Now we can easily search and pull tweets directly from Twitter:
+
+
+```r
+#can search hashtags directly
+data &lt;- search_tweets("#gradschool", n = 18000, include_rts = FALSE)
+
+#spaces between words operate like boolean "AND" operator
+data &lt;- search_tweets("grad school", n = 18000, include_rts = FALSE)
+
+#use "OR" to search for tweets with one of a list of words
+data &lt;- search_tweets("grad OR school", n = 18000, include_rts = FALSE)
+```
+
+Some things to note:
+
+- Only returns recent tweets: from past 6-9 days (due to Twitter's Search API)
+- Limit of 18,000 tweets on a single call, but can set *retryonratelimit = TRUE* to get more.
+- Can choose to include retweets with *include_rts = TRUE*
+
+---
+
+## Getting Data in a Tidy Text Format
+
+Before we can analyze our data, we need to get it into a tidy text format: a table where there is **one token per row**, per [Text Mining With R](https://www.tidytextmining.com). 
+
+A token is a meaningful unit of text we are interested in for analysis (word, phrase, sentence, paragraph). 
+
+
+
+Let's start by pulling out the columns we are interested in:
+
+```r
+gs_data &lt;- gs_data %&gt;% 
+  select(screen_name, created_at, text, hashtags)
+head(gs_data)
+```
+
+```
+## # A tibble: 6 x 4
+##   screen_name     created_at          text                        hashtags
+##   &lt;chr&gt;           &lt;dttm&gt;              &lt;chr&gt;                       &lt;list&gt;  
+## 1 rutgersGSA      2019-01-30 03:39:39 "📚 Grad Student Life and @… &lt;chr [6…
+## 2 rutgersGSA      2019-01-22 17:35:41 "Happy first day of class!… &lt;chr [4…
+## 3 extra_jordanary 2019-01-30 03:29:41 I'm ready for this quarter… &lt;chr [4…
+## 4 DuenoTatiana    2019-01-30 03:29:15 I will not drop out. I wil… &lt;chr [1…
+## 5 A_L_F_Writes    2019-01-30 03:27:12 Time to start my #first #e… &lt;chr [9…
+## 6 aprilmbrown8    2019-01-30 03:25:36 40% done! #gradstudent #gr… &lt;chr [6…
+```
+
+---
+## Getting Data in a Tidy Text Format
+
+Next, we can use the **unnest_tokens()** function (from package [**tidytext**](https://cran.r-project.org/web/packages/tidytext/vignettes/tidytext.html)) to split the words in the "text" column apart into a new column called "word" where each word is on its own row (tidytext format!). 
+
+
+```r
+gs_words &lt;- gs_data %&gt;%
+  unnest_tokens(word, text, token = "words")
+
+head(gs_words, n = 4)
+```
+
+```
+## # A tibble: 4 x 4
+##   screen_name created_at          hashtags  word   
+##   &lt;chr&gt;       &lt;dttm&gt;              &lt;list&gt;    &lt;chr&gt;  
+## 1 rutgersGSA  2019-01-30 03:39:39 &lt;chr [6]&gt; grad   
+## 2 rutgersGSA  2019-01-30 03:39:39 &lt;chr [6]&gt; student
+## 3 rutgersGSA  2019-01-30 03:39:39 &lt;chr [6]&gt; life   
+## 4 rutgersGSA  2019-01-30 03:39:39 &lt;chr [6]&gt; and
+```
+
+- Note that we could use different tokens here: built in options for "characters", "words", "ngrams", "sentences", "lines" etc. 
+- "ngrams" are adjacent words, use argument *n = 2* to select word pairs, for example. 
+---
+## Word Counts
+
+Now that our data is in a tidytext format, we can count the number of occurrences of each word. 
+
+
+```r
+gs_counts &lt;- gs_words %&gt;%
+  count(word, sort = TRUE)
+
+head(gs_counts, n = 10)
+```
+
+```
+## # A tibble: 10 x 2
+##    word           n
+##    &lt;chr&gt;      &lt;int&gt;
+##  1 gradschool  1398
+##  2 https       1018
+##  3 t.co        1018
+##  4 to           885
+##  5 the          833
+##  6 a            706
+##  7 and          622
+##  8 i            571
+##  9 of           488
+## 10 for          471
+```
+
+---
+
+## Quick Graph of Word Counts (n &gt; 400)
+
+![](Text_Analysis_Presentation_files/figure-html/gs_graph1-1.png)&lt;!-- --&gt;
+
+Issue: seeing lots of common words (and hyperlinks) - not very informative! 
+
+---
+
+## Stop Words
+
+We can remove these common words ("a", "the", "and", etc.) using an anti_join with the *stop_words* dataset from the **tidytext** package. 
+
+
+```r
+gs_words &lt;- gs_words %&gt;%
+  anti_join(stop_words)
+```
+
+To remove the "t.co" and "https" words we are seeing (remnants of twitter links!), we can just use bind_rows to add them to our stop_words list. 
+
+```r
+c_stop_words &lt;- bind_rows(data_frame(word = c("t.co", "https", "i’m"), 
+                                          lexicon = c("custom", "custom", "custom")), 
+                                          stop_words)
+
+gs_words &lt;- gs_words %&gt;%
+  anti_join(c_stop_words)
+```
+
+```
+## Joining, by = "word"
+```
+
+---
+
+## Graph Without Stop Words
+
+Now when we graph the word count, it is much more informative. 
+
+![](Text_Analysis_Presentation_files/figure-html/wordcountgraph2-1.png)&lt;!-- --&gt;
+
+---
+
+## A Slight Tangent: Other Stop Words
+
+You can customize the stop_words list, but for some data, you might want an entirely different stop_words list.  For example, say you were interested in mapping word frequency in Shakespeare's "The Comedy of Errors".  
+
+Using the [**gutenbergr**](https://cran.r-project.org/web/packages/gutenbergr/vignettes/intro.html) package, we can easily import text available through Project Gutenberg.  Using the *gutenberg_works()* function allows us to search by many parameters (author, title, etc.) only among those texts that are in English, can be downloaded, etc.  Using the ID#, we can then download the text. 
+
+
+```r
+library(gutenbergr)
+gutenberg_works(title == "The Comedy of Errors")
+```
+
+```
+## # A tibble: 1 x 8
+##   gutenberg_id title   author   gutenberg_autho… language gutenberg_books…
+##          &lt;int&gt; &lt;chr&gt;   &lt;chr&gt;               &lt;int&gt; &lt;chr&gt;    &lt;chr&gt;           
+## 1         1504 The Co… Shakesp…               65 en       &lt;NA&gt;            
+## # ... with 2 more variables: rights &lt;chr&gt;, has_text &lt;lgl&gt;
+```
+
+```r
+comedy_errors &lt;- gutenberg_download(1504)
+```
+
+---
+## A Slight Tangent: Other Stop Words
+
+Replicating what we did before with the twitter data, we can then use the *unnest_tokens()* function, *anti_join()* with stop_words, and then count and sort. 
+
+
+```r
+ce_words &lt;- comedy_errors %&gt;% unnest_tokens(word, text) %&gt;%
+  anti_join(stop_words) %&gt;% count(word, sort = TRUE)
+
+head(ce_words, n = 8)
+```
+
+```
+## # A tibble: 8 x 2
+##   word           n
+##   &lt;chr&gt;      &lt;int&gt;
+## 1 syracuse     227
+## 2 dromio       222
+## 3 antipholus   216
+## 4 ephesus      169
+## 5 thou         134
+## 6 sir          115
+## 7 adriana       90
+## 8 thee          66
+```
+We can see that there are still several common words ("thee", "thou") that weren't removed by the *anti_join()* with stop_words.  
+
+---
+## Elizabethan Stop Words
+
+Luckily for us, [Bryan Bumgardner](http://bryanbumgardner.com/elizabethan-stop-words-for-nlp/) has created a list of [Elizabethan Stop Words](https://github.com/BryanBumgardner/gutenburg_nlp/blob/master/stopwords_elizabethan) for this very use. 
+
+Thus, we can easily download Bryan's elizabethan_stop_words file, and use that to remove common words and create a WordCloud for "The Comedy of Errors".
+
+
+```r
+eliz_stop_words &lt;- import("stopwords_elizabethan.html", class = "tbl_df")
+eliz_stop_words$V1[127:150]
+```
+
+```
+##  [1] "art"       "doth"      "dost"      "'ere"      "hast"     
+##  [6] "hath"      "hence"     "hither"    "nigh"      "oft"      
+## [11] "should'st" "thither"   "thee"      "thou"      "thine"    
+## [16] "thy"       "'tis"      "'twas"     "wast"      "whence"   
+## [21] "wherefore" "whereto"   "withal"    "would'st"
+```
+
+```r
+ce_words &lt;- comedy_errors %&gt;% 
+  unnest_tokens(word, text) %&gt;%
+  anti_join(eliz_stop_words, by = c("word" = "V1")) %&gt;% 
+  count(word, sort = TRUE)
+```
+
+---
+
+## The Comedy of Errors Word Cloud
+
+&lt;img src="Text_Analysis_Presentation_files/figure-html/wordCloudShakes-1.png" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Back on Track: Assembling a Word Cloud
+
+Now that we have the counts, we can use the package [**ggwordcloud**](https://cran.r-project.org/web/packages/ggwordcloud/vignettes/ggwordcloud.html) to create a wordcloud of the most common words. 
+
+
+```r
+#filter to remove really large count for gradschool, and words with small counts
+gs_filter &lt;- gs_counts %&gt;%
+  filter(n &gt; 40 &amp; n &lt; 1000)
+
+#create wordcloud
+set.seed(12)
+ggplot(gs_filter, aes(label = word, size = n)) +
+  geom_text_wordcloud_area(rm_outside = TRUE) +
+  scale_size_area(max_size = 25) +
+  theme_minimal() 
+```
+
+- Note: use *set.seed()* command to avoid random fluctuation in word placement within cloud.
+- *scale_size_area()* sets true proportionality (so the words are scaled proportional to the value), and allows for better font size control. 
+- set *rm_outside = TRUE* to avoid overlapping words (removes words that don't fit).
+
+---
+## Basic Word Cloud
+
+
+&lt;img src="Text_Analysis_Presentation_files/figure-html/wordcloudexecute-1.png" style="display: block; margin: auto;" /&gt;
+
+---
+## Some Wordcloud Options: Angles
+
+To rotate some words, set the *angle* aesthetic.  Here, example of having 50% of the words randomly be turned 90 degrees. 
+
+
+```r
+gs_filter_angle &lt;- gs_filter %&gt;%
+  mutate(angle = 90 * sample(c(0, 1), n(), 
+                             replace = TRUE, 
+                             prob = c(50, 50)))
+
+wc1 &lt;- ggplot(gs_filter_angle, aes(label = word, 
+                                   size = n, 
+                                   angle = angle)) +
+  geom_text_wordcloud_area(rm_outside = TRUE) +
+  scale_size_area(max_size = 25) +
+  theme_minimal() 
+```
+
+---
+
+##Angled Word Cloud
+
+&lt;img src="Text_Analysis_Presentation_files/figure-html/angledprint-1.png" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Some Wordcloud Options: Shaped Clouds
+
+You can change the shape the wordcloud is presented in.  Default shape is a circle, but you can also use other shapes in the *shape* option within the *geom_text_wordcloud_area()* function.
+
+- cardioid
+- diamond 
+- square 
+- triangle-forward
+- triangle-upright
+- pentagon
+- star   
+
+
+```r
+wc2 &lt;- ggplot(gs_filter, aes(label = word, size = n)) +
+  geom_text_wordcloud_area(rm_outside = TRUE, shape = "diamond") +
+  scale_size_area(max_size = 20) +
+  theme_minimal() 
+```
+
+---
+
+## Shaped WordClouds: Diamond
+
+&lt;img src="Text_Analysis_Presentation_files/figure-html/shapedCloudprint-1.png" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Shaped WordClouds: Star
+
+&lt;img src="Text_Analysis_Presentation_files/figure-html/shapedCloudprintStar-1.png" style="display: block; margin: auto;" /&gt;
+
+---
+
+##Some Word Cloud Options: Color
+
+You can assign colors to the words in a cloud both randomly, and based on a value. 
+
+Random color assignment: 
+
+```r
+color &lt;- factor(sample.int(10, nrow(gs_filter), replace = TRUE))
+
+wc3 &lt;- ggplot(gs_filter, aes(label = word, size = n, color = color)) +
+  geom_text_wordcloud_area(rm_outside = TRUE) +
+  scale_size_area(max_size = 25) +
+  theme_minimal() 
+```
+
+Color assignment by the value of n:
+
+```r
+wc4 &lt;- ggplot(gs_filter, aes(label = word, size = n, color = n)) +
+  geom_text_wordcloud_area(rm_outside = TRUE) +
+  scale_size_area(max_size = 25) +
+  theme_minimal() +
+  scale_color_distiller(palette = "Spectral")
+```
+
+---
+## Word Cloud in (Random) Color
+
+&lt;img src="Text_Analysis_Presentation_files/figure-html/colorprint-1.png" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Word Cloud in Color (by n)
+
+&lt;img src="Text_Analysis_Presentation_files/figure-html/colorprint2-1.png" style="display: block; margin: auto;" /&gt;
+
+---
+
+## Sentiment Analysis
+
+We can also filter the words in our cloud according to their sentiment using the sentiment lexicons in the **sentiments** dataset within the **tidytext** package. 
+
+I'm going to use the "bing" lexicon, which categorizes words into positive or negative categories, and then we can use an *inner_join()* to combine this sentiment information with our tidytext data. 
+
+
+```r
+gs_words &lt;- gs_words %&gt;%
+  inner_join(get_sentiments("bing")) %&gt;%
+  count(word, sentiment, sort = TRUE)
+
+set.seed(15)
+sentcloud &lt;- gs_words %&gt;% 
+  group_by(sentiment) %&gt;% 
+  top_n(15) %&gt;%
+  ggplot(aes(label = word, size = n, color = sentiment)) +
+  geom_text_wordcloud_area(rm_outside = TRUE) +
+  scale_size_area(max_size = 30) +
+  theme_minimal()
+```
+
+---
+## Sentiment Analysis Word Cloud
+&lt;img src="Text_Analysis_Presentation_files/figure-html/sentimentCloudprint-1.png" style="display: block; margin: auto;" /&gt;
+    </textarea>
+<script src="https://remarkjs.com/downloads/remark-latest.min.js"></script>
+<script>var slideshow = remark.create({
+"highlightStyle": "github",
+"highlightLines": true,
+"countIncrementalSlides": false
+});
+if (window.HTMLWidgets) slideshow.on('afterShowSlide', function (slide) {
+  window.dispatchEvent(new Event('resize'));
+});
+(function() {
+  var d = document, s = d.createElement("style"), r = d.querySelector(".remark-slide-scaler");
+  if (!r) return;
+  s.type = "text/css"; s.innerHTML = "@page {size: " + r.style.width + " " + r.style.height +"; }";
+  d.head.appendChild(s);
+})();</script>
+
+<script>
+(function() {
+  var i, text, code, codes = document.getElementsByTagName('code');
+  for (i = 0; i < codes.length;) {
+    code = codes[i];
+    if (code.parentNode.tagName !== 'PRE' && code.childElementCount === 0) {
+      text = code.textContent;
+      if (/^\\\((.|\s)+\\\)$/.test(text) || /^\\\[(.|\s)+\\\]$/.test(text) ||
+          /^\$\$(.|\s)+\$\$$/.test(text) ||
+          /^\\begin\{([^}]+)\}(.|\s)+\\end\{[^}]+\}$/.test(text)) {
+        code.outerHTML = code.innerHTML;  // remove <code></code>
+        continue;
+      }
+    }
+    i++;
+  }
+})();
+</script>
+<!-- dynamically load mathjax for compatibility with self-contained -->
+<script>
+(function () {
+  var script = document.createElement('script');
+  script.type = 'text/javascript';
+  script.src  = 'https://mathjax.rstudio.com/latest/MathJax.js?config=TeX-MML-AM_CHTML';
+  if (location.protocol !== 'file:' && /^https?:/.test(script.src))
+    script.src  = script.src.replace(/^https?:/, '');
+  document.getElementsByTagName('head')[0].appendChild(script);
+})();
+</script>
+  </body>
+</html>
